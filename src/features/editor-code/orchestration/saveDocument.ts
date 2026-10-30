@@ -8,6 +8,7 @@ import * as ipc from '../../../core/ipc/commands';
 import { useDocumentStore } from '../../../stores/documentStore';
 import { useWindowStore } from '../../../stores/windowStore';
 import { getBaseline } from '../../editor-md/serialize';
+import { extractHeadings } from '../../wikilink/wikiLinkSyntax';
 import { kindFromPath, languageFromPath } from '../../../core/docKind';
 import type { WriteError } from '../../../core/ipc/types';
 import { moveDocumentHistory } from '../../history/documentHistory';
@@ -65,6 +66,25 @@ export function takeLastSaveIdentityMove(): { from: string; to: string } | null 
 /** 规范化路径身份比较（Windows 大小写不敏感，Android 等 POSIX 平台大小写敏感） */
 function samePathIdentity(a: string, b: string): boolean {
   return pathKey(a) === pathKey(b);
+}
+
+function sanitizeFilenamePart(value: string): string {
+  return Array.from(value)
+    .filter((character) => character.charCodeAt(0) >= 32)
+    .join('')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim()
+    .replace(/[. ]+$/, '');
+}
+
+/** Markdown 另存为优先使用首个标题作为文件名，非法字符则移除。 */
+function defaultSavePath(displayName: string | undefined, kind: string | undefined, content: string | null | undefined, extension: string): string {
+  if (kind === 'markdown') {
+    const title = extractHeadings(content ?? '')[0]?.text;
+    const filename = title ? sanitizeFilenamePart(title) : '';
+    if (filename) return `${filename}.${extension}`;
+  }
+  return displayName || `未命名.${extension}`;
 }
 
 export async function saveDocument(docKey: string): Promise<boolean> {
@@ -266,7 +286,7 @@ export async function saveAs(originalKey: string, _content: string): Promise<boo
     ];
   }
 
-  const defaultPath = doc?.displayName || `未命名.${defaultExtension}`;
+  const defaultPath = defaultSavePath(doc?.displayName, doc?.kind, doc?.content, defaultExtension);
 
   try {
     // 移动端由应用内命名对话框决定目标路径（系统保存对话框返回 content:// 无法按路径写盘）
